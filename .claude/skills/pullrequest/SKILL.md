@@ -60,7 +60,8 @@ Before anything, validate the work is ready:
 **1a. Read project rules:**
 ```bash
 # Read both if they exist
-cat CLAUDE.md 2>/dev/null; cat AGENTS.md 2>/dev/null; true
+cat CLAUDE.md 2>/dev/null || true
+cat AGENTS.md 2>/dev/null || true
 ```
 
 **1b. Recall the user's original task.** Check: is everything implemented? Is there anything extra that wasn't asked for?
@@ -81,14 +82,15 @@ npm run lint 2>/dev/null || pnpm lint 2>/dev/null || make lint 2>/dev/null || tr
 
 **1d. Quick sanity scan** — no hardcoded secrets, no debug `console.log`/`print` left behind, no unresolved TODOs from current work.
 
-### 1.5. Sync with upstream
+### 1.5. Sync with remote
 
 Before creating the PR, ensure your branch is up to date with the remote default branch:
 
-1. Fetch the latest changes from origin
-2. Determine the default branch (main/master)
-3. Rebase your current branch onto the updated default branch
-4. **If rebase conflicts occur** — stop and ask the user to resolve them manually before proceeding. Do NOT continue the pipeline with unresolved conflicts.
+1. **Guard**: verify you are on a feature branch (not the default branch). If on the default branch, skip this step — step 2a will handle the error.
+2. Fetch the latest changes from the default remote (usually `origin`)
+3. Determine the default branch name using remote HEAD resolution (same approach as step 2b — e.g. via `origin/HEAD`), not by hardcoding `main` or `master`
+4. Rebase your current branch onto the **remote-tracking** default branch (e.g. `origin/main`), not the local copy
+5. **If rebase conflicts occur** — stop and ask the user to resolve them manually before proceeding. Do NOT continue the pipeline with unresolved conflicts.
 
 This prevents creating PRs on a stale base, which would lead to merge conflicts discovered only after review loops.
 
