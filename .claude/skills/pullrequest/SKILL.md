@@ -19,6 +19,11 @@ description: Use when creating PR with automated Codex + Copilot code review loo
   │ 1. Self-check│
   └──────┬──────┘
          ▼
+  ┌──────────────┐
+  │ 1.5. Sync    │
+  │   with remote│
+  └──────┬───────┘
+         ▼
   ┌─────────────┐
   │ 2. Branch &  │
   │    Squash    │
@@ -54,8 +59,9 @@ Before anything, validate the work is ready:
 
 **1a. Read project rules:**
 ```bash
-# Read whichever exists
-cat CLAUDE.md 2>/dev/null || cat AGENTS.md 2>/dev/null || true
+# Read both if they exist
+cat CLAUDE.md 2>/dev/null || true
+cat AGENTS.md 2>/dev/null || true
 ```
 
 **1b. Recall the user's original task.** Check: is everything implemented? Is there anything extra that wasn't asked for?
@@ -75,6 +81,17 @@ npm run lint 2>/dev/null || pnpm lint 2>/dev/null || make lint 2>/dev/null || tr
 **If tests or lint fail** — fix the issues before proceeding. Do NOT skip this step.
 
 **1d. Quick sanity scan** — no hardcoded secrets, no debug `console.log`/`print` left behind, no unresolved TODOs from current work.
+
+### 1.5. Sync with remote
+
+Before creating the PR, ensure your branch is up to date with the remote default branch:
+
+1. **Guard**: determine the default branch via `origin/HEAD` resolution (same as step 2b). If the current branch matches the default branch, skip this step — step 2a will handle the error.
+2. Fetch the latest changes from `origin`
+3. Rebase your current branch onto the **remote-tracking** default branch from `origin` (e.g. `origin/main`), not the local copy
+4. **If rebase conflicts occur** — stop and ask the user to resolve them manually before proceeding. Do NOT continue the pipeline with unresolved conflicts.
+
+This prevents creating PRs on a stale base, which would lead to merge conflicts discovered only after review loops.
 
 ### 2. Branch & squash
 
