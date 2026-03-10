@@ -89,7 +89,7 @@ Before creating the PR, ensure your branch is up to date with the remote default
 1. **Guard**: determine the default branch via `origin/HEAD` resolution (same as step 2b). If the current branch matches the default branch, skip this step — step 2a will handle the error.
 2. Fetch the latest changes from `origin`
 3. Rebase your current branch onto the **remote-tracking** default branch from `origin` (e.g. `origin/main`), not the local copy
-5. **If rebase conflicts occur** — stop and ask the user to resolve them manually before proceeding. Do NOT continue the pipeline with unresolved conflicts.
+4. **If rebase conflicts occur** — stop and ask the user to resolve them manually before proceeding. Do NOT continue the pipeline with unresolved conflicts.
 
 This prevents creating PRs on a stale base, which would lead to merge conflicts discovered only after review loops.
 
