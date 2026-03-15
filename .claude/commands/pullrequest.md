@@ -15,4 +15,4 @@ Invoke the pullrequest skill and follow it exactly as presented to you.
 - If `$ARGUMENTS` contains "wait" → set **auto-merge mode = OFF** (ask user before merge)
 - Otherwise → set **auto-merge mode = ON** (default: auto-merge after successful review)
 
-Remember this mode throughout the workflow and apply it in step 6.
+Remember this mode throughout the workflow and apply it in step 7.

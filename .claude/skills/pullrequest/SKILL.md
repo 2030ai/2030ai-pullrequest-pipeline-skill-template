@@ -33,20 +33,24 @@ description: Use when creating PR with automated Codex + Copilot code review loo
   │ 3. Create PR │
   └──────┬──────┘
          ▼
-  ┌─────────────────┐
-  │ 4. Codex review  │◄──┐
-  │    loop (poll)   │   │ fix + push
-  └──────┬──────────┘   │
-         │ comments ────►┘
+  ┌──────────────────────┐
+  │ 4. Trigger both      │
+  │    Codex + Copilot   │
+  └──────┬───────────────┘
          ▼
-  ┌─────────────────┐
-  │ 5. Copilot review│◄──┐
-  │    loop (poll)   │   │ fix + push
-  └──────┬──────────┘   │
-         │ comments ────►┘
+  ┌──────────────────────┐
+  │ 5. Unified poll loop │
+  │    (wait for BOTH)   │
+  └──────┬───────────────┘
+         ▼
+  ┌──────────────────────┐
+  │ 6. Process comments  │◄──┐
+  │    (Codex + Copilot) │   │ fix + push + re-poll
+  └──────┬───────────────┘   │
+         │ new comments ────►┘
          ▼
   ┌─────────────┐
-  │ 6. Report &  │
+  │ 7. Report &  │
   │    Merge     │
   └─────────────┘
 ```
@@ -159,9 +163,9 @@ EOF
 
 Save the PR number for subsequent steps.
 
-### 4. Codex review loop
+### 4. Trigger both reviewers
 
-**Skip this step if Codex is not available** (check with a dry-run comment — if `@codex` is unknown, skip gracefully).
+Launch Codex and Copilot reviews **simultaneously**. Skip either if unavailable.
 
 **4a. Trigger Codex review:**
 ```bash
@@ -177,34 +181,83 @@ gh pr comment $PR_NUM --body "@codex Please review this PR:
 Reply with 👍 if no issues found."
 ```
 
-**4b. Poll for response (NOT sleep):**
+If `@codex` is unknown — set `CODEX_AVAILABLE=0`, skip Codex tracking.
 
-Poll every 60 seconds, up to 15 attempts (max ~15 minutes):
+**4b. Request Copilot review:**
+```bash
+gh pr edit $PR_NUM --add-reviewer copilot-pull-request-reviewer 2>/dev/null || true
+```
+
+If this fails (Copilot not enabled) — set `COPILOT_AVAILABLE=0`, skip Copilot tracking.
+
+### 5. Unified polling loop (wait for BOTH bots)
+
+Poll every 60 seconds, up to 15 attempts (max ~15 minutes).
+
+Track each bot independently: `CODEX_FOUND=0`, `COPILOT_FOUND=0`.
+
+**On each poll attempt, check ALL channels:**
 
 ```bash
-# Check BOTH response channels:
+# ── Codex detection ──
+# Codex login pattern: "codex" or "chatgpt-codex" (varies by GitHub App version)
 
-# 1. Issue comments (general verdict):
+# 1. Issue comments (PRIMARY channel — Codex replies here most often):
 gh api "repos/${REPO}/issues/${PR_NUM}/comments" \
   --jq '.[] | select(.user.login | test("codex|chatgpt-codex")) | {id: .id, body: .body}'
 
-# 2. Inline PR comments (code-specific):
+# 2. Reviews (formal verdict):
+gh api "repos/${REPO}/pulls/${PR_NUM}/reviews" \
+  --jq '.[] | select(.user.login | test("codex|chatgpt-codex")) | {id: .id, state: .state, body: .body}'
+
+# 3. Inline PR comments (code-specific suggestions):
+gh api "repos/${REPO}/pulls/${PR_NUM}/comments" \
+  --jq '.[] | select(.user.login | test("codex|chatgpt-codex")) | {id: .id, path: .path, line: .line, body: .body}'
+
+# If ANY of the above returns results → CODEX_FOUND=1
+
+# ── Copilot detection ──
+# Copilot uses TWO different usernames — check BOTH:
+
+# 1. Reviews (verdict):
+gh api "repos/${REPO}/pulls/${PR_NUM}/reviews" \
+  --jq '.[] | select(.user.login == "copilot-pull-request-reviewer[bot]") | {id: .id, state: .state, body: .body}'
+
+# 2. Inline comments (code-specific):
+gh api "repos/${REPO}/pulls/${PR_NUM}/comments" \
+  --jq '.[] | select(.user.login == "Copilot") | {id: .id, path: .path, line: .line, body: .body}'
+
+# If ANY of the above returns results → COPILOT_FOUND=1
+```
+
+**Exit polling when:**
+- `(CODEX_FOUND || !CODEX_AVAILABLE) && (COPILOT_FOUND || !COPILOT_AVAILABLE)` — both responded (or unavailable)
+- OR all 15 attempts exhausted → continue with whatever was found
+
+**Do NOT exit when only one bot responded — keep polling for the other.**
+
+### 6. Process comments (after polling completes)
+
+Process comments from **both bots** after the unified polling loop.
+
+**6a. Process Codex comments (up to 10 iterations):**
+
+Track processed comment IDs to avoid re-processing.
+
+Codex can respond via **issue comments**, **reviews**, or **inline PR comments**. Check all three:
+```bash
+# Issue comments from Codex (primary channel):
+gh api "repos/${REPO}/issues/${PR_NUM}/comments" \
+  --jq '.[] | select(.user.login | test("codex|chatgpt-codex")) | {id: .id, body: .body}'
+
+# Inline PR comments from Codex:
 gh api "repos/${REPO}/pulls/${PR_NUM}/comments" \
   --jq '.[] | select(.user.login | test("codex|chatgpt-codex")) | {id: .id, path: .path, line: .line, body: .body}'
 ```
 
-**Exit polling when:**
-- Issue comment contains "no major issues" / "looks good" / "LGTM" / 👍
-- OR inline comments appeared (process them)
-- OR max attempts reached (continue without error)
-
-**4c. Process comments (up to 10 iterations):**
-
-Track processed comment IDs to avoid re-processing.
-
-Find **unprocessed** comments — those whose `id` does NOT appear as `in_reply_to_id` in any other comment:
+For inline PR comments, find **unprocessed** ones — those whose `id` does NOT appear as `in_reply_to_id`:
 ```bash
-# All Codex comment IDs
+# All Codex inline comment IDs
 gh api "repos/${REPO}/pulls/${PR_NUM}/comments" \
   --jq '.[] | select(.user.login | test("codex|chatgpt-codex")) | .id'
 
@@ -214,6 +267,12 @@ gh api "repos/${REPO}/pulls/${PR_NUM}/comments" \
 ```
 
 A comment is **unprocessed** if its `id` is not in the reply-to list.
+
+**6b. Process Copilot comments (up to 10 iterations):**
+
+Same logic as 6a but for Copilot comments (`copilot-pull-request-reviewer[bot]` for reviews, `Copilot` for inline comments). Track unprocessed by `in_reply_to_id`.
+
+**6c. Comment evaluation — for both bots:**
 
 **Valid (fix):**
 - Bug, vulnerability, logic error
@@ -239,56 +298,21 @@ gh pr comment $PR_NUM --body "Declined: <reason>"
 ```
 Tell the user: what was found → why it was declined.
 
-**After each push** — poll again for new comments.
+**6d. Re-poll after fixes:**
+
+After each push, re-poll **only for the bot whose comments were fixed**:
+- If Codex comments were fixed → poll for new Codex responses (all 3 channels)
+- If Copilot comments were fixed → re-request Copilot review + poll:
+  ```bash
+  gh pr edit $PR_NUM --add-reviewer copilot-pull-request-reviewer 2>/dev/null || true
+  ```
 
 **Exit loop when:**
-- Codex says "no major issues" / LGTM / 👍
+- Bot says "no major issues" / LGTM / 👍
 - No new unprocessed comments after last push
-- Max 10 iterations reached
+- Max 10 iterations reached (per bot)
 
-### 5. Copilot review loop
-
-**5a. Request Copilot review:**
-```bash
-gh pr edit $PR_NUM --add-reviewer copilot-pull-request-reviewer 2>/dev/null || true
-```
-
-If this fails (Copilot not enabled in repo) — **skip step 5 entirely, continue to step 6.**
-
-**5b. Poll for Copilot response:**
-
-Poll every 60 seconds, up to 15 attempts:
-
-```bash
-# Copilot uses TWO different usernames — check BOTH:
-
-# 1. Reviews (verdict):
-gh api "repos/${REPO}/pulls/${PR_NUM}/reviews" \
-  --jq '.[] | select(.user.login == "copilot-pull-request-reviewer[bot]") | {id: .id, state: .state, body: .body}'
-
-# 2. Inline comments (code-specific):
-gh api "repos/${REPO}/pulls/${PR_NUM}/comments" \
-  --jq '.[] | select(.user.login == "Copilot") | {id: .id, path: .path, line: .line, body: .body}'
-```
-
-**Exit polling when:**
-- Review with state "COMMENTED" or "APPROVED" and no inline comments → no issues
-- Inline comments appeared → process them
-- Max attempts reached → continue without error
-
-**5c. Process Copilot comments:**
-
-Same logic as step 4c but for Copilot comments. Track unprocessed by `in_reply_to_id`.
-
-**After each push** — re-request Copilot review:
-```bash
-gh pr edit $PR_NUM --add-reviewer copilot-pull-request-reviewer 2>/dev/null || true
-```
-Then poll again.
-
-**Exit conditions:** same as step 4c.
-
-### 6. Report & merge
+### 7. Report & merge
 
 **6a. Final report:**
 
@@ -351,9 +375,9 @@ This skill works with **zero, one, or both** review bots:
 
 | Codex | Copilot | Behavior |
 |-------|---------|----------|
-| ✅ | ✅ | Full pipeline: both review loops |
-| ✅ | ❌ | Codex review only, skip step 5 |
-| ❌ | ✅ | Skip step 4, Copilot review only |
+| ✅ | ✅ | Full pipeline: trigger both, unified poll, process both |
+| ✅ | ❌ | Trigger Codex only, poll for Codex only |
+| ❌ | ✅ | Trigger Copilot only, poll for Copilot only |
 | ❌ | ❌ | Self-check only, create PR, skip to merge |
 
 Never fail because a reviewer bot is unavailable. Always continue the pipeline.

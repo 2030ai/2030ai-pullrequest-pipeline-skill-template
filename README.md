@@ -2,7 +2,7 @@
 
 A [Claude Code](https://claude.com/claude-code) skill that automates the entire PR lifecycle: **self-check → create PR → AI code review → merge**.
 
-It runs two independent review loops — **Codex** and **Copilot** — validates each comment, auto-fixes real issues, declines noise, and merges when ready.
+It triggers **Codex** and **Copilot** reviews simultaneously, waits for both in a unified polling loop, validates each comment, auto-fixes real issues, declines noise, and merges when ready.
 
 ```
 /pullrequest          # auto-merge after review
@@ -28,38 +28,44 @@ It runs two independent review loops — **Codex** and **Copilot** — validates
   └────────┬─────────┘
            ▼
   ┌──────────────────┐
-  │  4. Codex review  │◄──┐
-  │     loop (poll)   │   │ fix + push
-  └────────┬─────────┘   │
-           │ comments ───►┘
+  │  4. Trigger both  │  Codex + Copilot simultaneously
+  │     reviewers     │
+  └────────┬─────────┘
            ▼
   ┌──────────────────┐
-  │  5. Copilot review│◄──┐
-  │     loop (poll)   │   │ fix + push
-  └────────┬─────────┘   │
-           │ comments ───►┘
+  │  5. Unified poll  │  Wait for BOTH bots
+  │     loop          │
+  └────────┬─────────┘
            ▼
   ┌──────────────────┐
-  │  6. Report &      │  Summary table + merge
+  │  6. Process       │◄──┐
+  │     comments      │   │ fix + push + re-poll
+  └────────┬─────────┘   │
+           │ new comments►┘
+           ▼
+  ┌──────────────────┐
+  │  7. Report &      │  Summary table + merge
   │     Merge         │
   └──────────────────┘
 ```
 
 ### Review loop details
 
-Each review loop uses **polling** (every 60s, up to 15 attempts) instead of a blind `sleep`. Comments are tracked by `in_reply_to_id` — only truly unprocessed comments are handled:
+Both reviewers are triggered simultaneously and tracked in a **unified polling loop** (every 60s, up to 15 attempts). The loop waits for **both** bots to respond — it does not exit when only one has replied. Codex responds primarily via **issue comments**, while Copilot uses reviews + inline comments.
+
+After polling, comments from both bots are processed. Each comment is tracked by `in_reply_to_id` — only truly unprocessed comments are handled:
 
 - **Valid comment** (bug, vulnerability, side effect) → fix code, push, reply `Fixed: ...`
 - **Invalid comment** (subjective, over-engineering) → reply `Declined: ...`
-- After each push → poll for new comments, up to 10 fix iterations
+- After each push → re-poll only the bot whose comments triggered fixes, up to 10 iterations per bot
 
 ### Graceful degradation
 
 | Codex | Copilot | What happens |
 |:-----:|:-------:|:-------------|
-| ✅ | ✅ | Full pipeline — both review loops |
-| ✅ | ❌ | Codex review only |
-| ❌ | ✅ | Copilot review only |
+| ✅ | ✅ | Full pipeline — trigger both, unified poll, process both |
+| ✅ | ❌ | Trigger Codex only, poll for Codex only |
+| ❌ | ✅ | Trigger Copilot only, poll for Copilot only |
 | ❌ | ❌ | Self-check only → create PR → merge |
 
 The skill **never fails** because a reviewer bot is unavailable.
