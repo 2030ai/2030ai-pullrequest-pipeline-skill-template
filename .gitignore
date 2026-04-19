@@ -2,3 +2,7 @@
 *.swp
 *.swo
 *~
+
+# Local IDE skill mirrors (G2 policy: maintainer + public-facing repo)
+.cursor/skills/
+.codex/skills/
