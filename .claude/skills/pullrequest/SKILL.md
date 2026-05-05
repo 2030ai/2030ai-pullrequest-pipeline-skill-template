@@ -1,16 +1,30 @@
 ---
 name: pullrequest
-description: Use when creating PR with automated Codex + Copilot code review loop - self-validates work, creates branch, opens PR, triggers reviews, validates and fixes comments iteratively
+description: Use when creating PR with automated review levels - simple uses Codex + Copilot, medium adds Claude Code Review, max adds Claude ultrareview; self-validates work, creates branch, opens PR, triggers reviews, validates and fixes comments iteratively
 ---
 
-# PR Pipeline: self-check → PR → Codex review → Copilot review → merge
+# PR Pipeline: self-check → PR → review level → merge
 
 ## Modes
 
 | Mode | Invocation | Behavior |
 |------|-----------|----------|
-| **Auto (default)** | `/pullrequest` | Auto-merges after successful review |
-| **Wait** | `/pullrequest wait` | Asks user before merge |
+| **Auto (default)** | `/pullrequest` | Uses simple review level and auto-merges after successful review |
+| **Wait** | `/pullrequest wait` | Uses selected review level and asks user before merge |
+| **Medium** | `/pullrequest medium` or `/pullrequest claude` | Adds Claude Code Review |
+| **Max** | `/pullrequest max`, `/pullrequest ultra`, or `/pullrequest ultrareview` | Adds Claude ultrareview and asks before merge |
+
+Treat invocation arguments as `$ARGUMENTS` where the host exposes them. Modes can be combined, e.g. `/pullrequest wait medium`.
+
+## Review levels
+
+| Level | Aliases | Reviewers |
+|---|---|---|
+| **Simple (default)** | none, `simple` | Codex + Copilot |
+| **Medium** | `medium`, `claude` | Codex + Copilot + Claude Code Review |
+| **Max** | `max`, `ultra`, `ultrareview` | Codex + Copilot + Claude Code Review + one Claude ultrareview |
+
+Parse `$ARGUMENTS` once before triggering reviewers. If several level aliases are present, use the highest level: `max > medium > simple`. `wait` controls merge confirmation only; it does not change review level.
 
 ## Workflow overview
 
@@ -34,18 +48,18 @@ description: Use when creating PR with automated Codex + Copilot code review loo
   └──────┬──────┘
          ▼
   ┌──────────────────────┐
-  │ 4. Trigger both      │
-  │    Codex + Copilot   │
+  │ 4. Trigger selected  │
+  │ review level         │
   └──────┬───────────────┘
          ▼
   ┌──────────────────────┐
-  │ 5. Unified poll loop │
-  │    (wait for BOTH)   │
+  │ 5. Monitor/review    │
+  │ selected reviewers   │
   └──────┬───────────────┘
          ▼
   ┌──────────────────────┐
   │ 6. Process comments  │◄──┐
-  │    (Codex + Copilot) │   │ fix + push + re-poll
+  │ selected outputs     │   │ fix + push + re-poll
   └──────┬───────────────┘   │
          │ new comments ────►┘
          ▼
@@ -85,6 +99,8 @@ npm run lint 2>/dev/null || pnpm lint 2>/dev/null || make lint 2>/dev/null || tr
 **If tests or lint fail** — fix the issues before proceeding. Do NOT skip this step.
 
 **1d. Quick sanity scan** — no hardcoded secrets, no debug `console.log`/`print` left behind, no unresolved TODOs from current work.
+
+**1e. Docs consistency** — if `src/lib/` or module structure changed, check that `agent_docs/architecture.md` (or equivalent) reflects the changes. Flag if stale.
 
 ### 1.5. Sync with remote
 
@@ -163,9 +179,19 @@ EOF
 
 Save the PR number for subsequent steps.
 
-### 4. Trigger both reviewers
+### 4. Trigger selected review level
 
-Launch Codex and Copilot reviews **simultaneously**. Skip either if unavailable.
+Determine `REVIEW_LEVEL` once, then launch only the selected reviewers. Codex and Copilot run for every level; Claude Code Review runs only for `medium` and `max`; Claude ultrareview runs only once for `max`.
+
+```bash
+REVIEW_LEVEL=simple
+if printf '%s\n' "$ARGUMENTS" | rg -qi '\b(max|ultra|ultrareview)\b'; then
+  REVIEW_LEVEL=max
+elif printf '%s\n' "$ARGUMENTS" | rg -qi '\b(medium|claude)\b'; then
+  REVIEW_LEVEL=medium
+fi
+echo "Review level: $REVIEW_LEVEL"
+```
 
 **4a. Trigger Codex review:**
 ```bash
@@ -190,55 +216,115 @@ gh pr edit $PR_NUM --add-reviewer copilot-pull-request-reviewer 2>/dev/null || t
 
 If this fails (Copilot not enabled) — set `COPILOT_AVAILABLE=0`, skip Copilot tracking.
 
-### 5. Unified polling loop (wait for BOTH bots)
+**4c. Trigger Claude Code Review (`medium` / `max` only):**
 
-Poll every 60 seconds, up to 15 attempts (max ~15 minutes).
-
-Track each bot independently: `CODEX_FOUND=0`, `COPILOT_FOUND=0`.
-
-**On each poll attempt, check ALL channels:**
+Use `review once` by default to avoid subscribing the PR to paid review on every later push. The command must be the first line of a top-level PR comment.
 
 ```bash
-# ── Codex detection ──
-# Codex login pattern: "codex" or "chatgpt-codex" (varies by GitHub App version)
+if [ "$REVIEW_LEVEL" != "simple" ]; then
+  gh pr comment "$PR_NUM" --body "@claude review once
 
-# 1. Issue comments (PRIMARY channel — Codex replies here most often):
-gh api "repos/${REPO}/issues/${PR_NUM}/comments" \
-  --jq '.[] | select(.user.login | test("codex|chatgpt-codex")) | {id: .id, body: .body}'
-
-# 2. Reviews (formal verdict):
-gh api "repos/${REPO}/pulls/${PR_NUM}/reviews" \
-  --jq '.[] | select(.user.login | test("codex|chatgpt-codex")) | {id: .id, state: .state, body: .body}'
-
-# 3. Inline PR comments (code-specific suggestions):
-gh api "repos/${REPO}/pulls/${PR_NUM}/comments" \
-  --jq '.[] | select(.user.login | test("codex|chatgpt-codex")) | {id: .id, path: .path, line: .line, body: .body}'
-
-# If ANY of the above returns results → CODEX_FOUND=1
-
-# ── Copilot detection ──
-# Copilot uses TWO different usernames — check BOTH:
-
-# 1. Reviews (verdict):
-gh api "repos/${REPO}/pulls/${PR_NUM}/reviews" \
-  --jq '.[] | select(.user.login == "copilot-pull-request-reviewer[bot]") | {id: .id, state: .state, body: .body}'
-
-# 2. Inline comments (code-specific):
-gh api "repos/${REPO}/pulls/${PR_NUM}/comments" \
-  --jq '.[] | select(.user.login == "Copilot") | {id: .id, path: .path, line: .line, body: .body}'
-
-# If ANY of the above returns results → COPILOT_FOUND=1
+Focus on actionable correctness, security, regression, and project-rule issues introduced by this PR. Avoid style-only feedback unless it reflects an explicit repo rule."
+fi
 ```
 
-**Exit polling when:**
-- `(CODEX_FOUND || !CODEX_AVAILABLE) && (COPILOT_FOUND || !COPILOT_AVAILABLE)` — both responded (or unavailable)
-- OR all 15 attempts exhausted → continue with whatever was found
+If `REVIEW_LEVEL=simple`, set `CLAUDE_SKIPPED_BY_LEVEL=1` and do not track Claude. If `REVIEW_LEVEL` is `medium` or `max` and no Claude Code Review check, Claude comment, review, or reaction appears after the wait window — set `CLAUDE_AVAILABLE=0`, skip Claude tracking, and continue. Do not fail the PR pipeline solely because Claude is not enabled for the repository.
 
-**Do NOT exit when only one bot responded — keep polling for the other.**
+**4d. Claude ultrareview (`max` only):**
+
+Ultrareview is separate from GitHub Code Review. It must be explicitly requested through max level because it uses Claude Code on the web, may consume free runs or extra usage, and `claude ultrareview` counts as consent for the launch prompt. Run it at most once per max invocation; do not auto-rerun after fixes unless the user explicitly asks.
+
+```bash
+if [ "$REVIEW_LEVEL" = "max" ]; then
+  if command -v claude >/dev/null 2>&1; then
+    ULTRA_ERR=$(mktemp)
+    ULTRA_OUT=$(mktemp)
+    claude ultrareview "$PR_NUM" --timeout 30 >"$ULTRA_OUT" 2>"$ULTRA_ERR"
+    ULTRA_STATUS=$?
+    ULTRA_SESSION=$(rg -o 'https://claude\.ai/code/session_[A-Za-z0-9]+' "$ULTRA_ERR" | tail -1 || true)
+    [ -n "$ULTRA_SESSION" ] && gh pr comment "$PR_NUM" --body "Claude ultrareview: $ULTRA_SESSION"
+    cat "$ULTRA_OUT"
+    cat "$ULTRA_ERR" >&2
+    [ "$ULTRA_STATUS" -eq 0 ] || echo "Claude ultrareview failed or timed out; continue only after reporting this to the user."
+  else
+    echo "Claude CLI is not available; skipping ultrareview and reporting this to the user."
+  fi
+fi
+```
+
+In max level, do not merge until the ultrareview output has been evaluated and included in the final report.
+
+### 5. Wait for bot reviews
+
+**CRITICAL**: Reviewers typically respond in 3-5 minutes. Do NOT give up early.
+
+**NEVER use one-shot waits like `sleep N && gh api ...`.** Use `/wait-bot-review`, a Monitor/background task if the host supports it, or a bounded polling loop with a timeout. Polling loops are allowed for bot review because they keep checking until a real reviewer response appears.
+
+Track selected reviewers independently: `CODEX_FOUND=0`, `COPILOT_FOUND=0`, and `CLAUDE_FOUND=0` only for `medium`/`max`.
+
+**5a. Codex Monitor** (skip if `CODEX_AVAILABLE=0`):
+
+```
+Monitor(
+  description: "Codex review on PR #${PR_NUM}",
+  timeout_ms: 1800000,
+  persistent: false,
+  command: "REPO='${REPO}'; PR=${PR_NUM}; while true; do \
+    I=$(gh api \"repos/$REPO/issues/$PR/comments\" --jq '[.[] | select(.user.login == \"chatgpt-codex-connector[bot]\")] | length' 2>/dev/null || echo 0); \
+    R=$(gh api \"repos/$REPO/pulls/$PR/reviews\" --jq '[.[] | select(.user.login == \"chatgpt-codex-connector[bot]\")] | length' 2>/dev/null || echo 0); \
+    L=$(gh api \"repos/$REPO/pulls/$PR/comments\" --jq '[.[] | select(.user.login == \"chatgpt-codex-connector[bot]\")] | length' 2>/dev/null || echo 0); \
+    if [ \"$((I + R + L))\" -gt 0 ]; then echo \"Codex responded: issues=$I reviews=$R inline=$L\"; exit 0; fi; \
+    sleep 30; done"
+)
+```
+
+**5b. Copilot Monitor** (skip if `COPILOT_AVAILABLE=0`):
+
+Copilot uses TWO logins: `copilot-pull-request-reviewer[bot]` for reviews, `Copilot` for inline comments. One Monitor checks both:
+
+```
+Monitor(
+  description: "Copilot review on PR #${PR_NUM}",
+  timeout_ms: 1800000,
+  persistent: false,
+  command: "REPO='${REPO}'; PR=${PR_NUM}; while true; do \
+    R=$(gh api \"repos/$REPO/pulls/$PR/reviews\" --jq '[.[] | select(.user.login == \"copilot-pull-request-reviewer[bot]\")] | length' 2>/dev/null || echo 0); \
+    L=$(gh api \"repos/$REPO/pulls/$PR/comments\" --jq '[.[] | select(.user.login == \"Copilot\")] | length' 2>/dev/null || echo 0); \
+    if [ \"$((R + L))\" -gt 0 ]; then echo \"Copilot responded: reviews=$R inline=$L\"; exit 0; fi; \
+    sleep 30; done"
+)
+```
+
+**5c. Claude Monitor** (skip if `REVIEW_LEVEL=simple` or `CLAUDE_AVAILABLE=0`):
+
+Claude can surface results as PR comments/reviews, inline comments, or a `Claude Code Review` check run. Check all channels:
+
+```
+Monitor(
+  description: "Claude review on PR #${PR_NUM}",
+  timeout_ms: 1800000,
+  persistent: false,
+  command: "REPO='${REPO}'; PR=${PR_NUM}; while true; do \
+    I=$(gh api \"repos/$REPO/issues/$PR/comments\" --jq '[.[] | select(.user.login | test(\"claude\"; \"i\"))] | length' 2>/dev/null || echo 0); \
+    R=$(gh api \"repos/$REPO/pulls/$PR/reviews\" --jq '[.[] | select(.user.login | test(\"claude\"; \"i\"))] | length' 2>/dev/null || echo 0); \
+    L=$(gh api \"repos/$REPO/pulls/$PR/comments\" --jq '[.[] | select(.user.login | test(\"claude\"; \"i\"))] | length' 2>/dev/null || echo 0); \
+    C=$(gh pr view $PR --repo \"$REPO\" --json statusCheckRollup --jq '[.statusCheckRollup[]? | select((.name // \"\" | test(\"Claude\"; \"i\")) or (.workflowName // \"\" | test(\"Claude\"; \"i\")))] | length' 2>/dev/null || echo 0); \
+    if [ \"$((I + R + L + C))\" -gt 0 ]; then echo \"Claude responded: issues=$I reviews=$R inline=$L checks=$C\"; exit 0; fi; \
+    sleep 30; done"
+)
+```
+
+**5d. Continue when notifications arrive:**
+
+Each Monitor sends a notification on first detection or timeout. If Monitor is unavailable, use equivalent bounded polling loops. After receiving notification(s) for all selected reviewers, proceed to step 6.
+
+**Re-poll after fixes** — when you push corrections in step 6, start a NEW Monitor with `INITIAL_R/INITIAL_L` baselines (compare new counts against the count before the fix), so the Monitor exits when the bot leaves a NEW review/comment, not the old one.
+
+**Alternative**: invoke `/wait-bot-review <PR> <bot-login>` for one reviewer at a time. For Claude Code Review, also inspect the `Claude Code Review` check run because findings may live in check output/annotations even if GitHub rejects an inline comment.
 
 ### 6. Process comments (after polling completes)
 
-Process comments from **both bots** after the unified polling loop.
+Process comments from selected reviewers after Monitor/poll notifications arrive.
 
 **6a. Process Codex comments (up to 10 iterations):**
 
@@ -248,18 +334,18 @@ Codex can respond via **issue comments**, **reviews**, or **inline PR comments**
 ```bash
 # Issue comments from Codex (primary channel):
 gh api "repos/${REPO}/issues/${PR_NUM}/comments" \
-  --jq '.[] | select(.user.login | test("codex|chatgpt-codex")) | {id: .id, body: .body}'
+  --jq '.[] | select(.user.login == "chatgpt-codex-connector[bot]") | {id: .id, body: .body}'
 
 # Inline PR comments from Codex:
 gh api "repos/${REPO}/pulls/${PR_NUM}/comments" \
-  --jq '.[] | select(.user.login | test("codex|chatgpt-codex")) | {id: .id, path: .path, line: .line, body: .body}'
+  --jq '.[] | select(.user.login == "chatgpt-codex-connector[bot]") | {id: .id, path: .path, line: .line, body: .body}'
 ```
 
 For inline PR comments, find **unprocessed** ones — those whose `id` does NOT appear as `in_reply_to_id`:
 ```bash
 # All Codex inline comment IDs
 gh api "repos/${REPO}/pulls/${PR_NUM}/comments" \
-  --jq '.[] | select(.user.login | test("codex|chatgpt-codex")) | .id'
+  --jq '.[] | select(.user.login == "chatgpt-codex-connector[bot]") | .id'
 
 # All reply-to IDs (from anyone)
 gh api "repos/${REPO}/pulls/${PR_NUM}/comments" \
@@ -272,7 +358,31 @@ A comment is **unprocessed** if its `id` is not in the reply-to list.
 
 Same logic as 6a but for Copilot comments (`copilot-pull-request-reviewer[bot]` for reviews, `Copilot` for inline comments). Track unprocessed by `in_reply_to_id`.
 
-**6c. Comment evaluation — for both bots:**
+**6c. Process Claude comments/checks (medium/max only, up to 10 iterations):**
+
+Claude Code Review may post inline comments, reviews, top-level comments, and a neutral check run. Check all sources:
+
+```bash
+# Claude top-level comments:
+gh api "repos/${REPO}/issues/${PR_NUM}/comments" \
+  --jq '.[] | select(.user.login | test("claude"; "i")) | {id: .id, body: .body}'
+
+# Claude inline PR comments:
+gh api "repos/${REPO}/pulls/${PR_NUM}/comments" \
+  --jq '.[] | select(.user.login | test("claude"; "i")) | {id: .id, path: .path, line: .line, body: .body, in_reply_to_id: .in_reply_to_id}'
+
+# Claude review/check run summary:
+gh pr view "$PR_NUM" --repo "$REPO" --json statusCheckRollup \
+  --jq '.statusCheckRollup[]? | select((.name // "" | test("Claude"; "i")) or (.workflowName // "" | test("Claude"; "i"))) | {name, status, conclusion, detailsUrl}'
+```
+
+If the `Claude Code Review` check run says issues were found but inline comments are missing, open/use the Details URL and process the findings from the check output.
+
+**6d. Process ultrareview output (max only):**
+
+Treat `claude ultrareview` findings like reviewer comments. Fix real bugs and push; decline only with a concrete technical reason. Because ultrareview is explicit and cost-bearing, include its status, session URL, and findings count in the final report even if it finds nothing. Do not rerun ultrareview automatically after fixes.
+
+**6e. Comment evaluation — for selected reviewers:**
 
 **Valid (fix):**
 - Bug, vulnerability, logic error
@@ -298,14 +408,27 @@ gh pr comment $PR_NUM --body "Declined: <reason>"
 ```
 Tell the user: what was found → why it was declined.
 
-**6d. Re-poll after fixes:**
+**6f. Re-poll after fixes (Monitor with baseline):**
 
-After each push, re-poll **only for the bot whose comments were fixed**:
-- If Codex comments were fixed → poll for new Codex responses (all 3 channels)
-- If Copilot comments were fixed → re-request Copilot review + poll:
-  ```bash
-  gh pr edit $PR_NUM --add-reviewer copilot-pull-request-reviewer 2>/dev/null || true
-  ```
+After each push, start a NEW Monitor for **only the bot whose comments were fixed**. The Monitor must compare against the count BEFORE the fix (baseline), so it exits on the NEXT bot response, not the existing ones.
+
+For Copilot, also re-request the review first:
+```bash
+gh pr edit $PR_NUM --add-reviewer copilot-pull-request-reviewer 2>/dev/null || true
+```
+
+For Claude Code Review, request a one-shot re-review only when `REVIEW_LEVEL` is `medium` or `max`:
+```bash
+if [ "$REVIEW_LEVEL" != "simple" ]; then
+  gh pr comment "$PR_NUM" --body "@claude review once
+
+Re-review after fixes. Focus only on remaining actionable correctness, security, regression, and explicit project-rule issues."
+fi
+```
+
+Then start a new Monitor or bounded polling loop with count baselines for the fixed reviewer only. Use the same channels as step 5: Codex issue/review/inline, Copilot review/inline, Claude issue/review/inline/check run.
+
+**Do NOT** use `sleep 240 && gh api` after a fix — same blocking-thread issue as step 5.
 
 **Exit loop when:**
 - Bot says "no major issues" / LGTM / 👍
@@ -314,24 +437,30 @@ After each push, re-poll **only for the bot whose comments were fixed**:
 
 ### 7. Report & merge
 
-**6a. Final report:**
+**7a. Final report:**
 
 ```markdown
 ## PR Review Summary
 | | Count |
 |---|---|
+| **Review level** | simple / medium / max |
 | **Codex iterations** | N |
 | **Codex comments fixed** | M |
 | **Codex comments declined** | K |
 | **Copilot iterations** | N |
 | **Copilot comments fixed** | M |
 | **Copilot comments declined** | K |
+| **Claude Code Review iterations** | N |
+| **Claude comments/check findings fixed** | M |
+| **Claude comments/check findings declined** | K |
+| **Claude Code Review** | skipped by level / unavailable / clean / findings fixed |
+| **Claude ultrareview** | skipped by level / clean / findings fixed / failed |
 | **Status** | ✅ Ready to merge / ⚠️ Needs attention |
 ```
 
 Show the PR URL.
 
-**6b. Merge (depends on mode):**
+**7b. Merge (depends on mode):**
 
 **Auto mode (default) AND status is "ready":**
 ```bash
@@ -343,6 +472,8 @@ Tell user: PR merged automatically.
 Ask user: "PR is ready to merge. Merge now?"
 - Yes → `gh pr merge $PR_NUM --squash --delete-branch`
 - No → leave PR open
+
+**Max level:** never auto-merge without explicitly reporting ultrareview status and asking the user to merge, even if auto mode was otherwise selected.
 
 **If merge fails** (conflicts, checks not passed) — report error, do NOT retry blindly.
 
@@ -371,13 +502,13 @@ When evaluating reviewer comments, apply these criteria consistently:
 
 ## Graceful degradation
 
-This skill works with **zero, one, or both** review bots:
+This skill works with any subset of reviewers:
 
-| Codex | Copilot | Behavior |
-|-------|---------|----------|
-| ✅ | ✅ | Full pipeline: trigger both, unified poll, process both |
-| ✅ | ❌ | Trigger Codex only, poll for Codex only |
-| ❌ | ✅ | Trigger Copilot only, poll for Copilot only |
-| ❌ | ❌ | Self-check only, create PR, skip to merge |
+| Reviewer | Levels | Trigger | Detection |
+|---|---|---|---|
+| Codex | all levels | `@codex ...` PR comment | `chatgpt-codex-connector[bot]` issue comments, reviews, inline comments |
+| Copilot | all levels | `--add-reviewer copilot-pull-request-reviewer` | `copilot-pull-request-reviewer[bot]` reviews, `Copilot` inline comments |
+| Claude Code Review | medium/max only | `@claude review once` top-level PR comment | Claude issue comments, reviews, inline comments, `Claude Code Review` check runs |
+| Claude ultrareview | max only | `claude ultrareview <PR>` | CLI output and session URL |
 
-Never fail because a reviewer bot is unavailable. Always continue the pipeline.
+Never fail because a selected reviewer is unavailable. Continue with the remaining selected reviewers, but be explicit in the final report about anything skipped by level or unavailable.

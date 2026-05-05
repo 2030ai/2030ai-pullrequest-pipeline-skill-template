@@ -1,171 +1,71 @@
-# `/pullrequest` — PR Pipeline Skill for Claude Code
+# Pullrequest Skill Template
 
-A [Claude Code](https://claude.com/claude-code) skill that automates the entire PR lifecycle: **self-check → create PR → AI code review → merge**.
+Claude Code PR workflow for repositories that want an automated review loop before merge.
 
-It triggers **Codex** and **Copilot** reviews simultaneously, waits for both in a unified polling loop, validates each comment, auto-fixes real issues, declines noise, and merges when ready.
+It creates or reuses a PR, runs project checks, asks selected AI reviewers, processes actionable comments, pushes fixes, and reports the result before merge.
 
-```
-/pullrequest          # auto-merge after review
-/pullrequest wait     # ask before merge
-```
+## Review Levels
 
----
+| Level | Command | Reviewers |
+|---|---|---|
+| Simple | `/pullrequest` | Codex + Copilot |
+| Medium | `/pullrequest medium` or `/pullrequest claude` | Codex + Copilot + Claude Code Review |
+| Max | `/pullrequest max`, `/pullrequest ultra`, `/pullrequest ultrareview` | Medium + one Claude ultrareview |
 
-## How it works
+`wait` is independent:
 
-```
-  ┌──────────────────┐
-  │  1. Self-check    │  Run tests, lint, scan for secrets
-  └────────┬─────────┘
-           ▼
-  ┌──────────────────┐
-  │  2. Branch &      │  Squash commits, push
-  │     Squash        │
-  └────────┬─────────┘
-           ▼
-  ┌──────────────────┐
-  │  3. Create PR     │  Or reuse existing one
-  └────────┬─────────┘
-           ▼
-  ┌──────────────────┐
-  │  4. Trigger both  │  Codex + Copilot simultaneously
-  │     reviewers     │
-  └────────┬─────────┘
-           ▼
-  ┌──────────────────┐
-  │  5. Unified poll  │  Wait for BOTH bots
-  │     loop          │
-  └────────┬─────────┘
-           ▼
-  ┌──────────────────┐
-  │  6. Process       │◄──┐
-  │     comments      │   │ fix + push + re-poll
-  └────────┬─────────┘   │
-           │ new comments►┘
-           ▼
-  ┌──────────────────┐
-  │  7. Report &      │  Summary table + merge
-  │     Merge         │
-  └──────────────────┘
+```bash
+/pullrequest wait medium
 ```
 
-### Review loop details
-
-Both reviewers are triggered simultaneously and tracked in a **unified polling loop** (every 60s, up to 15 attempts). The loop waits for **both** bots to respond — it does not exit when only one has replied. Codex responds primarily via **issue comments**, while Copilot uses reviews + inline comments.
-
-After polling, comments from both bots are processed. Each comment is tracked by `in_reply_to_id` — only truly unprocessed comments are handled:
-
-- **Valid comment** (bug, vulnerability, side effect) → fix code, push, reply `Fixed: ...`
-- **Invalid comment** (subjective, over-engineering) → reply `Declined: ...`
-- After each push → re-poll only the bot whose comments triggered fixes, up to 10 iterations per bot
-
-### Graceful degradation
-
-| Codex | Copilot | What happens |
-|:-----:|:-------:|:-------------|
-| ✅ | ✅ | Full pipeline — trigger both, unified poll, process both |
-| ✅ | ❌ | Trigger Codex only, poll for Codex only |
-| ❌ | ✅ | Trigger Copilot only, poll for Copilot only |
-| ❌ | ❌ | Self-check only → create PR → merge |
-
-The skill **never fails** because a reviewer bot is unavailable.
-
----
+If several level aliases are present, the strongest wins: `max > medium > simple`. Max always reports ultrareview status and asks before merge.
 
 ## Install
 
-### Per-project (recommended for teams)
+From your repository root:
 
 ```bash
-# From repo root
 mkdir -p .claude/commands .claude/skills/pullrequest
 
-curl -sL https://raw.githubusercontent.com/2030ai/pullrequest-pipeline-skill-template/main/.claude/commands/pullrequest.md \
+curl -sL https://raw.githubusercontent.com/2030ai/2030ai-pullrequest-pipeline-skill-template/main/.claude/commands/pullrequest.md \
   -o .claude/commands/pullrequest.md
 
-curl -sL https://raw.githubusercontent.com/2030ai/pullrequest-pipeline-skill-template/main/.claude/skills/pullrequest/SKILL.md \
+curl -sL https://raw.githubusercontent.com/2030ai/2030ai-pullrequest-pipeline-skill-template/main/.claude/skills/pullrequest/SKILL.md \
   -o .claude/skills/pullrequest/SKILL.md
 ```
 
-### Global (available in all projects)
-
-```bash
-mkdir -p ~/.claude/commands ~/.claude/skills/pullrequest
-
-curl -sL https://raw.githubusercontent.com/2030ai/pullrequest-pipeline-skill-template/main/.claude/commands/pullrequest.md \
-  -o ~/.claude/commands/pullrequest.md
-
-curl -sL https://raw.githubusercontent.com/2030ai/pullrequest-pipeline-skill-template/main/.claude/skills/pullrequest/SKILL.md \
-  -o ~/.claude/skills/pullrequest/SKILL.md
-```
-
-### Manual
-
-Copy these two files into your `.claude/` directory:
-
-```
-.claude/
-├── commands/
-│   └── pullrequest.md      # slash command entry point
-└── skills/
-    └── pullrequest/
-        └── SKILL.md         # full pipeline logic
-```
-
----
+For global install, use the same files under `~/.claude/`.
 
 ## Requirements
 
-| Requirement | Required | Notes |
-|-------------|:--------:|-------|
-| [Claude Code](https://claude.com/claude-code) | ✅ | CLI agent |
-| [GitHub CLI (`gh`)](https://cli.github.com/) | ✅ | Must be authenticated (`gh auth login`) |
-| [Codex GitHub App](https://github.com/apps/openai-codex-connector) | Optional | Install on your repo for AI review |
-| [Copilot Code Review](https://docs.github.com/en/copilot/using-github-copilot/code-review/using-copilot-code-review) | Optional | Enable in repo settings |
+| Requirement | Needed for |
+|---|---|
+| Claude Code | Running the skill |
+| GitHub CLI (`gh auth login`) | PR creation, review requests, merge |
+| Codex GitHub App | Codex review |
+| GitHub Copilot Code Review | Copilot review |
+| Claude Code Review integration | Medium/max review |
+| Claude CLI | Max ultrareview |
 
----
+Missing reviewers do not fail the pipeline. The skill records them as unavailable and continues with the reviewers that are configured.
 
-## What the self-check does
+## Workflow
 
-Before creating a PR, the skill automatically:
+1. Read project rules from `AGENTS.md` / `CLAUDE.md`.
+2. Run available tests and lint commands.
+3. Sync and rebase the feature branch.
+4. Create or reuse the PR.
+5. Trigger the selected review level.
+6. Fix or decline reviewer comments with reasons.
+7. Report review status and merge according to mode.
 
-1. Reads `CLAUDE.md` / `AGENTS.md` project rules
-2. Recalls the original task and checks completeness
-3. Detects and runs your project's test suite (`npm test`, `pytest`, `go test`, `cargo test`, etc.)
-4. Runs linter if available
-5. Scans for hardcoded secrets, leftover debug output, unresolved TODOs
+## Notes
 
----
-
-## Comment validation rules
-
-The skill doesn't blindly accept every reviewer suggestion. It applies consistent criteria:
-
-| Always fix | Always decline |
-|:-----------|:---------------|
-| Security vulnerabilities | "Consider X instead of Y" without reasoning |
-| Logic bugs | Patterns the project explicitly avoids |
-| Data loss / corruption risks | Premature optimization |
-| Race conditions | Abstraction layers for single-use code |
-| Missing null checks at boundaries | Style contradicting project conventions |
-
----
-
-## FAQ
-
-**Q: What if I don't have Codex or Copilot?**
-A: The skill works without either. It will self-check, create the PR, and proceed to merge.
-
-**Q: Can I use this with a fork-based workflow?**
-A: This template is designed for direct-push workflows (you push to origin). For fork-based workflows, you'll need to adjust the remote names and PR creation commands.
-
-**Q: What merge strategy does it use?**
-A: Squash merge (`--squash --delete-branch`) by default.
-
-**Q: What if a review comment is wrong?**
-A: The skill evaluates each comment against validation rules and declines invalid suggestions with a reason. You'll see a report of what was fixed vs declined.
-
----
+- Default mode is intentionally cheaper: Codex + Copilot only.
+- Use `medium` when Claude Code Review is worth the extra cost.
+- Use `max` only for important PRs; ultrareview runs once per invocation and is not rerun automatically after fixes.
+- The default merge strategy is squash merge.
+- Fork-based repositories may need to adapt remote names and PR creation commands.
 
 ## License
 

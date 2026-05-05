@@ -1,18 +1,18 @@
 ---
-description: "Create PR with automated Codex + Copilot code review loop. Auto-merges by default. Use 'wait' to ask before merge."
+description: "Create PR with review levels: simple=Codex+Copilot, medium adds Claude, max adds ultrareview. Add wait to ask before merge."
 arguments:
   - name: mode
-    description: "Optional: 'wait' to ask user before merge (default: auto-merge)"
+    description: "Optional: wait, medium/claude, max/ultra/ultrareview, or combinations"
     required: false
 ---
 
-Invoke the pullrequest skill and follow it exactly as presented to you.
-
-## Mode Detection
+Invoke the `pullrequest` skill and follow it exactly.
 
 **Arguments received:** `$ARGUMENTS`
 
-- If `$ARGUMENTS` contains "wait" → set **auto-merge mode = OFF** (ask user before merge)
-- Otherwise → set **auto-merge mode = ON** (default: auto-merge after successful review)
-
-Remember this mode throughout the workflow and apply it in step 7.
+- `wait` controls merge confirmation only.
+- Review level defaults to `simple`.
+- `medium` / `claude` adds Claude Code Review.
+- `max` / `ultra` / `ultrareview` adds one Claude ultrareview.
+- If several level aliases are present, use the strongest level: `max > medium > simple`.
+- In max mode, report ultrareview status and ask before merge even when auto mode would otherwise merge.
