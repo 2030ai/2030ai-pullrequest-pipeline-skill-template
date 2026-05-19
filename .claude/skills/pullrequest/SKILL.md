@@ -1,6 +1,6 @@
 ---
 name: pullrequest
-description: Use when creating PR with automated review levels - simple uses Codex + Copilot, medium adds Claude Code Review, max adds Claude ultrareview; self-validates work, creates branch, opens PR, triggers reviews, validates and fixes comments iteratively
+description: Use when creating PR with automated review levels - simple uses Codex + Copilot, medium adds Cursor Bugbot + Claude Code Review, max adds Cursor Bugbot + Claude Code Review + Claude ultrareview; self-validates work, creates branch, opens PR, triggers reviews, validates and fixes comments iteratively
 ---
 
 # PR Pipeline: self-check → PR → review level → merge
@@ -11,8 +11,8 @@ description: Use when creating PR with automated review levels - simple uses Cod
 |------|-----------|----------|
 | **Auto (default)** | `/pullrequest` | Uses simple review level and auto-merges after successful review |
 | **Wait** | `/pullrequest wait` | Uses selected review level and asks user before merge |
-| **Medium** | `/pullrequest medium` or `/pullrequest claude` | Adds Claude Code Review |
-| **Max** | `/pullrequest max`, `/pullrequest ultra`, or `/pullrequest ultrareview` | Adds Claude ultrareview and asks before merge |
+| **Medium** | `/pullrequest medium` or `/pullrequest claude` | Adds Cursor Bugbot and Claude Code Review |
+| **Max** | `/pullrequest max`, `/pullrequest ultra`, or `/pullrequest ultrareview` | Adds Cursor Bugbot, Claude Code Review, and Claude ultrareview; asks before merge |
 
 Treat invocation arguments as `$ARGUMENTS` where the host exposes them. Modes can be combined, e.g. `/pullrequest wait medium`.
 
@@ -21,8 +21,8 @@ Treat invocation arguments as `$ARGUMENTS` where the host exposes them. Modes ca
 | Level | Aliases | Reviewers |
 |---|---|---|
 | **Simple (default)** | none, `simple` | Codex + Copilot |
-| **Medium** | `medium`, `claude` | Codex + Copilot + Claude Code Review |
-| **Max** | `max`, `ultra`, `ultrareview` | Codex + Copilot + Claude Code Review + one Claude ultrareview |
+| **Medium** | `medium`, `claude` | Codex + Copilot + Cursor Bugbot + Claude Code Review |
+| **Max** | `max`, `ultra`, `ultrareview` | Codex + Copilot + Cursor Bugbot + Claude Code Review + one Claude ultrareview |
 
 Parse `$ARGUMENTS` once before triggering reviewers. If several level aliases are present, use the highest level: `max > medium > simple`. `wait` controls merge confirmation only; it does not change review level.
 
@@ -181,7 +181,7 @@ Save the PR number for subsequent steps.
 
 ### 4. Trigger selected review level
 
-Determine `REVIEW_LEVEL` once, then launch only the selected reviewers. Codex and Copilot run for every level; Claude Code Review runs only for `medium` and `max`; Claude ultrareview runs only once for `max`.
+Determine `REVIEW_LEVEL` once, then launch only the selected reviewers. Codex and Copilot run for every level; Cursor Bugbot and Claude Code Review run only for `medium` and `max`; Claude ultrareview runs only once for `max`.
 
 ```bash
 REVIEW_LEVEL=simple
@@ -230,7 +230,22 @@ fi
 
 If `REVIEW_LEVEL=simple`, set `CLAUDE_SKIPPED_BY_LEVEL=1` and do not track Claude. If `REVIEW_LEVEL` is `medium` or `max` and no Claude Code Review check, Claude comment, review, or reaction appears after the wait window — set `CLAUDE_AVAILABLE=0`, skip Claude tracking, and continue. Do not fail the PR pipeline solely because Claude is not enabled for the repository.
 
-**4d. Claude ultrareview (`max` only):**
+**4d. Trigger Cursor Bugbot (`medium` / `max` only):**
+
+Use `@cursor review` as a top-level PR comment. The command must be the first line so GitHub routes it to Cursor/Bugbot reliably. If this mention-style trigger does not get any Cursor/Bugbot signal, use documented Bugbot fallback `cursor review` once before marking Cursor unavailable.
+
+```bash
+if [ "$REVIEW_LEVEL" != "simple" ]; then
+  CURSOR_REVIEW_COMMAND="@cursor review"
+  gh pr comment "$PR_NUM" --body "@cursor review
+
+Focus on actionable correctness, security, regression, and project-rule issues introduced by this PR. Avoid style-only feedback unless it reflects an explicit repo rule."
+fi
+```
+
+If `REVIEW_LEVEL=simple`, set `CURSOR_SKIPPED_BY_LEVEL=1` and do not track Cursor. If `REVIEW_LEVEL` is `medium` or `max` and no Cursor/Bugbot comment, review, check, or reaction appears after the primary wait window, post a second top-level PR comment whose first line is `cursor review`, set `CURSOR_REVIEW_COMMAND="cursor review"`, and monitor once more. If the fallback also produces no Cursor/Bugbot signal, set `CURSOR_AVAILABLE=0`, skip Cursor tracking, and continue. Do not fail the PR pipeline solely because Cursor Bugbot is not enabled for the repository.
+
+**4e. Claude ultrareview (`max` only):**
 
 Ultrareview is separate from GitHub Code Review. It must be explicitly requested through max level because it uses Claude Code on the web, may consume free runs or extra usage, and `claude ultrareview` counts as consent for the launch prompt. Run it at most once per max invocation; do not auto-rerun after fixes unless the user explicitly asks.
 
@@ -260,7 +275,7 @@ In max level, do not merge until the ultrareview output has been evaluated and i
 
 **NEVER use one-shot waits like `sleep N && gh api ...`.** Use `/wait-bot-review`, a Monitor/background task if the host supports it, or a bounded polling loop with a timeout. Polling loops are allowed for bot review because they keep checking until a real reviewer response appears.
 
-Track selected reviewers independently: `CODEX_FOUND=0`, `COPILOT_FOUND=0`, and `CLAUDE_FOUND=0` only for `medium`/`max`.
+Track selected reviewers independently: `CODEX_FOUND=0`, `COPILOT_FOUND=0`, plus `CURSOR_FOUND=0` and `CLAUDE_FOUND=0` only for `medium`/`max`.
 
 **5a. Codex Monitor** (skip if `CODEX_AVAILABLE=0`):
 
@@ -314,13 +329,44 @@ Monitor(
 )
 ```
 
-**5d. Continue when notifications arrive:**
+**5d. Cursor Monitor** (skip if `REVIEW_LEVEL=simple` or `CURSOR_AVAILABLE=0`):
+
+Cursor/Bugbot can surface results as issue comments, PR reviews, inline comments, or checks. Check all channels and match either `cursor` or `bugbot` in the bot/check identity:
+
+```
+Monitor(
+  description: "Cursor Bugbot review on PR #${PR_NUM}",
+  timeout_ms: 1800000,
+  persistent: false,
+  command: "REPO='${REPO}'; PR=${PR_NUM}; while true; do \
+    I=$(gh api \"repos/$REPO/issues/$PR/comments\" --jq '[.[] | select(.user.login | test(\"cursor|bugbot\"; \"i\"))] | length' 2>/dev/null || echo 0); \
+    R=$(gh api \"repos/$REPO/pulls/$PR/reviews\" --jq '[.[] | select(.user.login | test(\"cursor|bugbot\"; \"i\"))] | length' 2>/dev/null || echo 0); \
+    L=$(gh api \"repos/$REPO/pulls/$PR/comments\" --jq '[.[] | select(.user.login | test(\"cursor|bugbot\"; \"i\"))] | length' 2>/dev/null || echo 0); \
+    C=$(gh pr view $PR --repo \"$REPO\" --json statusCheckRollup --jq '[.statusCheckRollup[]? | select((.name // \"\" | test(\"Cursor|Bugbot\"; \"i\")) or (.workflowName // \"\" | test(\"Cursor|Bugbot\"; \"i\")))] | length' 2>/dev/null || echo 0); \
+    if [ \"$((I + R + L + C))\" -gt 0 ]; then echo \"Cursor Bugbot responded: issues=$I reviews=$R inline=$L checks=$C\"; exit 0; fi; \
+    sleep 30; done"
+)
+```
+
+If this monitor times out after the primary `@cursor review` trigger, post the documented fallback and run the Cursor Monitor once more:
+
+```bash
+if [ "$REVIEW_LEVEL" != "simple" ] && [ "${CURSOR_FALLBACK_TRIED:-0}" != "1" ]; then
+  CURSOR_FALLBACK_TRIED=1
+  CURSOR_REVIEW_COMMAND="cursor review"
+  gh pr comment "$PR_NUM" --body "cursor review
+
+Focus on actionable correctness, security, regression, and project-rule issues introduced by this PR. Avoid style-only feedback unless it reflects an explicit repo rule."
+fi
+```
+
+**5e. Continue when notifications arrive:**
 
 Each Monitor sends a notification on first detection or timeout. If Monitor is unavailable, use equivalent bounded polling loops. After receiving notification(s) for all selected reviewers, proceed to step 6.
 
 **Re-poll after fixes** — when you push corrections in step 6, start a NEW Monitor with `INITIAL_R/INITIAL_L` baselines (compare new counts against the count before the fix), so the Monitor exits when the bot leaves a NEW review/comment, not the old one.
 
-**Alternative**: invoke `/wait-bot-review <PR> <bot-login>` for one reviewer at a time. For Claude Code Review, also inspect the `Claude Code Review` check run because findings may live in check output/annotations even if GitHub rejects an inline comment.
+**Alternative**: invoke `/wait-bot-review <PR> <bot-login>` for one reviewer at a time. For Claude Code Review and Cursor Bugbot, also inspect their check runs because findings may live in check output/annotations even if GitHub rejects an inline comment.
 
 ### 6. Process comments (after polling completes)
 
@@ -378,11 +424,31 @@ gh pr view "$PR_NUM" --repo "$REPO" --json statusCheckRollup \
 
 If the `Claude Code Review` check run says issues were found but inline comments are missing, open/use the Details URL and process the findings from the check output.
 
-**6d. Process ultrareview output (max only):**
+**6d. Process Cursor Bugbot comments/checks (medium/max only, up to 10 iterations):**
+
+Cursor Bugbot may post inline comments, reviews, top-level comments, and checks. Check all sources:
+
+```bash
+# Cursor/Bugbot top-level comments:
+gh api "repos/${REPO}/issues/${PR_NUM}/comments" \
+  --jq '.[] | select(.user.login | test("cursor|bugbot"; "i")) | {id: .id, body: .body}'
+
+# Cursor/Bugbot inline PR comments:
+gh api "repos/${REPO}/pulls/${PR_NUM}/comments" \
+  --jq '.[] | select(.user.login | test("cursor|bugbot"; "i")) | {id: .id, path: .path, line: .line, body: .body, in_reply_to_id: .in_reply_to_id}'
+
+# Cursor/Bugbot review/check run summary:
+gh pr view "$PR_NUM" --repo "$REPO" --json statusCheckRollup \
+  --jq '.statusCheckRollup[]? | select((.name // "" | test("Cursor|Bugbot"; "i")) or (.workflowName // "" | test("Cursor|Bugbot"; "i"))) | {name, status, conclusion, detailsUrl}'
+```
+
+If a Cursor/Bugbot check says issues were found but inline comments are missing, open/use the Details URL and process the findings from the check output.
+
+**6e. Process ultrareview output (max only):**
 
 Treat `claude ultrareview` findings like reviewer comments. Fix real bugs and push; decline only with a concrete technical reason. Because ultrareview is explicit and cost-bearing, include its status, session URL, and findings count in the final report even if it finds nothing. Do not rerun ultrareview automatically after fixes.
 
-**6e. Comment evaluation — for selected reviewers:**
+**6f. Comment evaluation — for selected reviewers:**
 
 **Valid (fix):**
 - Bug, vulnerability, logic error
@@ -408,7 +474,7 @@ gh pr comment $PR_NUM --body "Declined: <reason>"
 ```
 Tell the user: what was found → why it was declined.
 
-**6f. Re-poll after fixes (Monitor with baseline):**
+**6g. Re-poll after fixes (Monitor with baseline):**
 
 After each push, start a NEW Monitor for **only the bot whose comments were fixed**. The Monitor must compare against the count BEFORE the fix (baseline), so it exits on the NEXT bot response, not the existing ones.
 
@@ -426,7 +492,17 @@ Re-review after fixes. Focus only on remaining actionable correctness, security,
 fi
 ```
 
-Then start a new Monitor or bounded polling loop with count baselines for the fixed reviewer only. Use the same channels as step 5: Codex issue/review/inline, Copilot review/inline, Claude issue/review/inline/check run.
+For Cursor Bugbot, request a re-review only when `REVIEW_LEVEL` is `medium` or `max` and the fixed comment came from Cursor:
+```bash
+if [ "$REVIEW_LEVEL" != "simple" ]; then
+  CURSOR_REVIEW_COMMAND=${CURSOR_REVIEW_COMMAND:-"@cursor review"}
+  gh pr comment "$PR_NUM" --body "$CURSOR_REVIEW_COMMAND
+
+Re-review after fixes. Focus only on remaining actionable correctness, security, regression, and explicit project-rule issues."
+fi
+```
+
+Then start a new Monitor or bounded polling loop with count baselines for the fixed reviewer only. Use the same channels as step 5: Codex issue/review/inline, Copilot review/inline, Claude issue/review/inline/check run, Cursor issue/review/inline/check run.
 
 **Do NOT** use `sleep 240 && gh api` after a fix — same blocking-thread issue as step 5.
 
@@ -450,9 +526,13 @@ Then start a new Monitor or bounded polling loop with count baselines for the fi
 | **Copilot iterations** | N |
 | **Copilot comments fixed** | M |
 | **Copilot comments declined** | K |
+| **Cursor Bugbot iterations** | N |
+| **Cursor comments/check findings fixed** | M |
+| **Cursor comments/check findings declined** | K |
 | **Claude Code Review iterations** | N |
 | **Claude comments/check findings fixed** | M |
 | **Claude comments/check findings declined** | K |
+| **Cursor Bugbot** | skipped by level / unavailable / clean / findings fixed |
 | **Claude Code Review** | skipped by level / unavailable / clean / findings fixed |
 | **Claude ultrareview** | skipped by level / clean / findings fixed / failed |
 | **Status** | ✅ Ready to merge / ⚠️ Needs attention |
@@ -508,6 +588,7 @@ This skill works with any subset of reviewers:
 |---|---|---|---|
 | Codex | all levels | `@codex ...` PR comment | `chatgpt-codex-connector[bot]` issue comments, reviews, inline comments |
 | Copilot | all levels | `--add-reviewer copilot-pull-request-reviewer` | `copilot-pull-request-reviewer[bot]` reviews, `Copilot` inline comments |
+| Cursor Bugbot | medium/max only | `@cursor review` top-level PR comment; fallback `cursor review` if no signal | Cursor/Bugbot issue comments, reviews, inline comments, checks |
 | Claude Code Review | medium/max only | `@claude review once` top-level PR comment | Claude issue comments, reviews, inline comments, `Claude Code Review` check runs |
 | Claude ultrareview | max only | `claude ultrareview <PR>` | CLI output and session URL |
 

@@ -9,7 +9,7 @@ It creates or reuses a PR, runs project checks, asks selected AI reviewers, proc
 | Level | Command | Reviewers |
 |---|---|---|
 | Simple | `/pullrequest` | Codex + Copilot |
-| Medium | `/pullrequest medium` or `/pullrequest claude` | Codex + Copilot + Claude Code Review |
+| Medium | `/pullrequest medium` or `/pullrequest claude` | Codex + Copilot + Cursor Bugbot + Claude Code Review |
 | Max | `/pullrequest max`, `/pullrequest ultra`, `/pullrequest ultrareview` | Medium + one Claude ultrareview |
 
 `wait` is independent:
@@ -44,6 +44,7 @@ For global install, use the same files under `~/.claude/`.
 | GitHub CLI (`gh auth login`) | PR creation, review requests, merge |
 | Codex GitHub App | Codex review |
 | GitHub Copilot Code Review | Copilot review |
+| Cursor Bugbot GitHub App | Medium/max Cursor review (`@cursor review`, with `cursor review` fallback) |
 | Claude Code Review integration | Medium/max review |
 | Claude CLI | Max ultrareview |
 
@@ -62,7 +63,7 @@ Missing reviewers do not fail the pipeline. The skill records them as unavailabl
 ## Notes
 
 - Default mode is intentionally cheaper: Codex + Copilot only.
-- Use `medium` when Claude Code Review is worth the extra cost.
+- Use `medium` when Cursor Bugbot and Claude Code Review are worth the extra cost.
 - Use `max` only for important PRs; ultrareview runs once per invocation and is not rerun automatically after fixes.
 - The default merge strategy is squash merge.
 - Fork-based repositories may need to adapt remote names and PR creation commands.
