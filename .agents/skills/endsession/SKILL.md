@@ -1,6 +1,8 @@
 ---
 name: endsession
 description: "Закрытие рабочей сессии без хвостов: проверка, что задача доведена до корректной точки остановки, фиксация результата, обновление обязательной документации и явная передача follow-up. Use when user asks to finish, wrap up, close the session, end the day, or 'сделай что положено по AGENTS/CLAUDE'."
+argument-hint: "[optional closeout notes or constraints]"
+disable-model-invocation: true
 ---
 
 # Endsession

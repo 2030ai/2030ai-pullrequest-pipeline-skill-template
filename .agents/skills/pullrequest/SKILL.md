@@ -1,6 +1,8 @@
 ---
 name: pullrequest
 description: Use when creating PR with automated review levels - simple uses Codex + Copilot, medium adds Cursor Bugbot + Claude Code Review, max adds Cursor Bugbot + Claude Code Review + Claude ultrareview; self-validates work, creates branch, opens PR, triggers reviews, validates and fixes comments iteratively
+argument-hint: "[wait] [simple|medium|claude|max|ultra|ultrareview]"
+disable-model-invocation: true
 ---
 
 # PR Pipeline: self-check → PR → review level → merge
