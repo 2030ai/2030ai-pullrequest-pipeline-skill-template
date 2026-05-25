@@ -25,16 +25,24 @@ If several level aliases are present, the strongest wins: `max > medium > simple
 From your repository root:
 
 ```bash
-mkdir -p .claude/commands .claude/skills/pullrequest
+mkdir -p .agents/skills/pullrequest .agents/skills/endsession .claude/skills .codex/skills .cursor/skills
 
-curl -sL https://raw.githubusercontent.com/2030ai/2030ai-pullrequest-pipeline-skill-template/main/.claude/commands/pullrequest.md \
-  -o .claude/commands/pullrequest.md
+curl -sL https://raw.githubusercontent.com/2030ai/2030ai-pullrequest-pipeline-skill-template/main/.agents/skills/pullrequest/SKILL.md \
+  -o .agents/skills/pullrequest/SKILL.md
 
-curl -sL https://raw.githubusercontent.com/2030ai/2030ai-pullrequest-pipeline-skill-template/main/.claude/skills/pullrequest/SKILL.md \
-  -o .claude/skills/pullrequest/SKILL.md
+curl -sL https://raw.githubusercontent.com/2030ai/2030ai-pullrequest-pipeline-skill-template/main/.agents/skills/endsession/SKILL.md \
+  -o .agents/skills/endsession/SKILL.md
+
+ln -s ../../.agents/skills/pullrequest .claude/skills/pullrequest
+ln -s ../../.agents/skills/pullrequest .codex/skills/pullrequest
+ln -s ../../.agents/skills/pullrequest .cursor/skills/pullrequest
+
+ln -s ../../.agents/skills/endsession .claude/skills/endsession
+ln -s ../../.agents/skills/endsession .codex/skills/endsession
+ln -s ../../.agents/skills/endsession .cursor/skills/endsession
 ```
 
-For global install, use the same files under `~/.claude/`.
+For global install, copy the skill directory under `~/.claude/skills/`. Project-local installs should keep `.agents/skills/<name>/SKILL.md` as the source and use platform mirrors.
 
 ## Requirements
 
