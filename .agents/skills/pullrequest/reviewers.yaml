@@ -1,0 +1,54 @@
+# Source of truth for /pullrequest reviewer selection.
+# SKILL.md describes how to trigger and process each reviewer; this file decides
+# which reviewers participate in each review mode.
+
+review_modes:
+  medium:
+    reviewers:
+      - codex
+      - copilot
+      - cursor_bugbot
+      - claude_code_review
+    ultrareview: none
+
+  max:
+    reviewers:
+      - codex
+      - copilot
+      - cursor_bugbot
+      - claude_code_review
+    ultrareview: user_run_handoff
+
+reviewers:
+  codex:
+    trigger: pr_comment
+    command: "@codex"
+    bot_login: "chatgpt-codex-connector[bot]"
+
+  copilot:
+    trigger: add_reviewer
+    reviewer: "copilot-pull-request-reviewer"
+    review_bot_login: "copilot-pull-request-reviewer[bot]"
+    inline_login: "Copilot"
+
+  cursor_bugbot:
+    trigger: pr_comment
+    command: "@cursor review"
+    fallback_command: "cursor review"
+    identity_pattern: "cursor|bugbot"
+
+  claude_code_review:
+    trigger: pr_comment
+    command: "@claude review once"
+    identity_pattern: "claude"
+
+ultrareview:
+  mode: user_run_handoff
+  preferred_command: "/ultrareview <base-ref>"
+  alternate_command: "/code-review ultra <base-ref>"
+  rules:
+    - "Do not launch cost-bearing ultrareview from the agent shell."
+    - "Prepare a two-prompt Claude Code CLI handoff."
+    - "Prompt 1 verifies worktree, branch, head SHA, base SHA, clean status, and diff."
+    - "Prompt 2 is only the clean slash command; do not append prose to command arguments."
+    - "Wait for user-provided launch output or findings before claiming ultrareview ran."
