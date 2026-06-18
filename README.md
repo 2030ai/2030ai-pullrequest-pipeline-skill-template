@@ -11,12 +11,6 @@ It creates or reuses a PR, runs project checks, asks selected AI reviewers, proc
 | Medium | `/pullrequest` or `/pullrequest medium` or `/pullrequest claude` | Codex + Copilot + Cursor Bugbot + Claude Code Review |
 | Max | `/pullrequest max`, `/pullrequest ultra`, or `/pullrequest ultrareview` | Medium + one user-run Claude Code ultrareview handoff |
 
-`wait` is independent:
-
-```bash
-/pullrequest wait medium
-```
-
 If several mode aliases are present, the strongest wins: `max > medium`. Max always reports ultrareview status and asks before merge.
 
 ## Install

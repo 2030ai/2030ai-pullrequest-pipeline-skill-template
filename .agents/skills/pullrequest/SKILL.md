@@ -16,7 +16,7 @@ If the user explicitly names reviewers in the current invocation, treat that as 
 
 ## User authorization
 
-Вызов `/pullrequest` (любой review mode или modifier) — это explicit user authorization для ВСЕХ шагов pipeline:
+Вызов `/pullrequest` (любой review mode) — это explicit user authorization для ВСЕХ шагов pipeline:
 - `git reset --soft` + squash-commit
 - `git push --force-with-lease`
 - `gh pr create`
@@ -26,7 +26,7 @@ If the user explicitly names reviewers in the current invocation, treat that as 
 
 Системные правила «NEVER commit/push unless the user explicitly asks» из встроенного промпта Bash tool удовлетворены самим вызовом слэш-команды — не запрашивать подтверждения отдельно для каждого шага.
 
-**НЕ задавать пользователю вопросов** «push?», «merge?», «deploy?», «commit fix?» в середине pipeline. Спрашивать перед merge разрешено только в трёх случаях (см. step 7b): `wait` modifier, `max` review mode, или роль `not-maintainer`/unknown для целевого репо по optional project-local maintainership config.
+**НЕ задавать пользователю вопросов** «push?», «merge?», «deploy?», «commit fix?» в середине pipeline. Спрашивать перед merge разрешено только в двух случаях (см. step 7b): `max` review mode или роль `not-maintainer`/unknown для целевого репо по optional project-local maintainership config.
 
 **Останавливаться и сообщать пользователю** только на:
 - Rebase/merge conflicts
@@ -38,18 +38,17 @@ If the user explicitly names reviewers in the current invocation, treat that as 
 
 ## Invocation
 
-Canonical review modes are `medium` and `max`. `wait` and `auto` are merge modifiers, not review modes.
+Canonical review modes are `medium` and `max`.
 
 | Invocation | Review mode | Reviewers | Merge behavior |
 |---|---|---|---|
 | `/pullrequest` | `medium` (default) | Codex + Copilot + Cursor Bugbot + Claude Code Review | Role-aware auto-merge: `maintainer` → auto-merge if no hard blockers; `not-maintainer` → ask before merge. |
 | `/pullrequest medium` | `medium` | Codex + Copilot + Cursor Bugbot + Claude Code Review | Role-aware auto-merge. |
 | `/pullrequest max` | `max` | Codex + Copilot + Cursor Bugbot + Claude Code Review + one user-run Claude Code ultrareview handoff | Always ask before merge. |
-| `/pullrequest wait [medium/max]` | selected review mode, default `medium` | selected reviewers | Always ask before merge. |
 
-`auto` may be supplied explicitly, but it is already the default merge behavior for `medium`. Legacy aliases remain accepted for compatibility: `claude` → `medium`; `ultra` / `ultrareview` → `max`. Prefer canonical names in new instructions.
+Legacy aliases remain accepted for compatibility: `claude` → `medium`; `ultra` / `ultrareview` → `max`. Prefer canonical names in new instructions.
 
-Treat invocation arguments as `$ARGUMENTS` where the host exposes them. Review modes and modifiers can be combined, e.g. `/pullrequest wait medium`.
+Treat invocation arguments as `$ARGUMENTS` where the host exposes them.
 
 ## Review modes
 
@@ -58,7 +57,7 @@ Treat invocation arguments as `$ARGUMENTS` where the host exposes them. Review m
 | **Medium (default)** | none, `medium`; legacy `claude` | Codex + Copilot + Cursor Bugbot + Claude Code Review |
 | **Max** | `max`; legacy `ultra`, `ultrareview` | Codex + Copilot + Cursor Bugbot + Claude Code Review + one user-run Claude Code ultrareview handoff |
 
-Parse `$ARGUMENTS` once before triggering reviewers. If several review-mode tokens are present, use the highest mode: `max > medium`. `wait` controls merge confirmation only; it does not change review mode.
+Parse `$ARGUMENTS` once before triggering reviewers. If several review-mode tokens are present, use the highest mode: `max > medium`.
 
 ## Workflow overview
 
@@ -743,21 +742,16 @@ A merge is blocked if any of:
 
 Declined-but-acknowledged review comments, optional CI workflows, or `⏭️ project override` cells in the 7a table do **not** block.
 
-**Medium without `wait` AND `ROLE=="maintainer"` AND no hard blockers:**
+**Medium AND `ROLE=="maintainer"` AND no hard blockers:**
 ```bash
 gh pr merge $PR_NUM --squash --delete-branch
 ```
 Tell user: `PR merged automatically (maintainer of $NWO).`
 
-**Medium without `wait` AND `ROLE=="not-maintainer"`:**
+**Medium AND `ROLE=="not-maintainer"`:**
 Ask user: `"PR ready to merge. Maintainer auto-merge is not enabled for $NWO. Merge now?"`
 - Yes → `gh pr merge $PR_NUM --squash --delete-branch`
 - No → leave PR open with explicit handoff in the final report.
-
-**`wait` modifier (any role):**
-Ask user: `"PR is ready to merge. Merge now?"`
-- Yes → `gh pr merge $PR_NUM --squash --delete-branch`
-- No → leave PR open.
 
 **Max review mode (any role):** never auto-merge without explicitly reporting ultrareview status and asking the user to merge, even if `ROLE=="maintainer"`. Auto-merge protection is intentional for the costly ultrareview path.
 
