@@ -60,6 +60,14 @@ For global install, copy the skill directory under `~/.claude/skills/`. Project-
 
 Missing reviewers do not fail the pipeline. The skill records them as unavailable and continues with the reviewers that are configured.
 
+## Public Template Defaults
+
+The default `/pullrequest` mode is `medium`, so it attempts to trigger every reviewer listed for `medium` in `reviewers.yaml`: Codex, Copilot, Cursor Bugbot, and Claude Code Review. Before using this in a team or public repository, edit `.agents/skills/pullrequest/reviewers.yaml` to remove reviewers you have not installed, do not trust, or do not want to pay for.
+
+For merge safety, this template treats maintainership as unknown unless the repository defines an optional project-local maintainership table at `.agents/pullrequest-maintainership.md` or `.github/pullrequest-maintainership.md`. Without that file, medium-mode PRs ask before merge instead of auto-merging.
+
+Max mode never launches ultrareview from the agent shell. It prepares a user-run Claude Code handoff so the human can decide whether to spend that review run.
+
 ## Workflow
 
 1. Read project rules from `AGENTS.md` / `CLAUDE.md`.

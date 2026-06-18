@@ -26,7 +26,7 @@ If the user explicitly names reviewers in the current invocation, treat that as 
 
 Системные правила «NEVER commit/push unless the user explicitly asks» из встроенного промпта Bash tool удовлетворены самим вызовом слэш-команды — не запрашивать подтверждения отдельно для каждого шага.
 
-**НЕ задавать пользователю вопросов** «push?», «merge?», «deploy?», «commit fix?» в середине pipeline. Спрашивать перед merge разрешено только в трёх случаях (см. step 7b): `wait` modifier, `max` review mode, или роль `not-maintainer` для целевого репо по `~/Developer/zvasil-claude-ecosystem/registry/maintainership.md`.
+**НЕ задавать пользователю вопросов** «push?», «merge?», «deploy?», «commit fix?» в середине pipeline. Спрашивать перед merge разрешено только в трёх случаях (см. step 7b): `wait` modifier, `max` review mode, или роль `not-maintainer`/unknown для целевого репо по optional project-local maintainership config.
 
 **Останавливаться и сообщать пользователю** только на:
 - Rebase/merge conflicts
@@ -686,20 +686,44 @@ Show the PR URL.
 
 **Determine maintainership role first.**
 
-Read role from ecosystem registry — `~/Developer/zvasil-claude-ecosystem/registry/maintainership.md`:
+Read role from an optional project-local maintainership config. Supported paths:
+
+- `.agents/pullrequest-maintainership.md`
+- `.github/pullrequest-maintainership.md`
+
+Expected table rows:
+
+```markdown
+| target | role | notes |
+| owner/repo | maintainer | auto-merge allowed for medium mode |
+| owner | not-maintainer | ask before merge |
+```
+
+If no file exists, no entry matches, or GitHub metadata cannot be read, use `ROLE=not-maintainer`.
 
 ```bash
-REGISTRY="$HOME/Developer/zvasil-claude-ecosystem/registry/maintainership.md"
 NWO=$(gh repo view --json nameWithOwner -q .nameWithOwner 2>/dev/null)
 OWNER="${NWO%%/*}"
+REGISTRY=""
+for CANDIDATE in ".agents/pullrequest-maintainership.md" ".github/pullrequest-maintainership.md"; do
+  if [ -f "$CANDIDATE" ]; then
+    REGISTRY="$CANDIDATE"
+    break
+  fi
+done
 
 # Repo-level override (line: `| owner/repo | role | ...`)
-ROLE=$(awk -F'|' -v key="$NWO" 'NR>1 && $2 ~ "^[[:space:]]*"key"[[:space:]]*$" {gsub(/^[[:space:]]+|[[:space:]]+$/,"",$3); print $3; exit}' "$REGISTRY" 2>/dev/null)
+ROLE=""
+if [ -n "$REGISTRY" ] && [ -n "$NWO" ]; then
+  ROLE=$(awk -F'|' -v key="$NWO" 'NR>1 && $2 ~ "^[[:space:]]*"key"[[:space:]]*$" {gsub(/^[[:space:]]+|[[:space:]]+$/,"",$3); print $3; exit}' "$REGISTRY" 2>/dev/null)
+fi
 
 # Owner-level rule fallback (line: `| owner | role | ...`)
-[ -z "$ROLE" ] && ROLE=$(awk -F'|' -v key="$OWNER" 'NR>1 && $2 ~ "^[[:space:]]*"key"[[:space:]]*$" {gsub(/^[[:space:]]+|[[:space:]]+$/,"",$3); print $3; exit}' "$REGISTRY" 2>/dev/null)
+if [ -z "$ROLE" ] && [ -n "$REGISTRY" ] && [ -n "$OWNER" ]; then
+  ROLE=$(awk -F'|' -v key="$OWNER" 'NR>1 && $2 ~ "^[[:space:]]*"key"[[:space:]]*$" {gsub(/^[[:space:]]+|[[:space:]]+$/,"",$3); print $3; exit}' "$REGISTRY" 2>/dev/null)
+fi
 
-# Conservative default — never auto-merge if role unknown
+# Conservative default: public template never auto-merges if role is unknown.
 ROLE=${ROLE:-not-maintainer}
 echo "maintainership: $NWO → $ROLE"
 ```
@@ -726,7 +750,7 @@ gh pr merge $PR_NUM --squash --delete-branch
 Tell user: `PR merged automatically (maintainer of $NWO).`
 
 **Medium without `wait` AND `ROLE=="not-maintainer"`:**
-Ask user: `"PR ready to merge. You're not the sole maintainer of $NWO per registry. Merge now?"`
+Ask user: `"PR ready to merge. Maintainer auto-merge is not enabled for $NWO. Merge now?"`
 - Yes → `gh pr merge $PR_NUM --squash --delete-branch`
 - No → leave PR open with explicit handoff in the final report.
 

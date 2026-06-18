@@ -1,113 +1,104 @@
 ---
 name: endsession
-description: "Закрытие рабочей сессии без хвостов: проверка, что задача доведена до корректной точки остановки, фиксация результата, обновление обязательной документации и явная передача follow-up. Use when user asks to finish, wrap up, close the session, end the day, or 'сделай что положено по AGENTS/CLAUDE'."
-argument-hint: "[optional closeout notes or constraints]"
-disable-model-invocation: true
+description: "Close a coding session cleanly: verify the task reached a safe stopping point, inspect real repo state, update required project documentation, preserve handoff context, and report remaining risks. Use when the user asks to finish, wrap up, close the session, end the day, or follow project closeout rules."
 ---
 
 # Endsession
 
-Заверши сессию аккуратно, не пропуская project-specific closeout rules.
+Close the session without leaving avoidable ambiguity or unfinished agent work.
 
 ## Workflow
 
-### 1. Re-read closeout rules
+### 1. Re-read Closeout Rules
 
-Перед закрытием сессии быстро проверь локальные правила проекта:
+Check local project instructions before finalizing:
 
 - `AGENTS.md`
 - `CLAUDE.md`
-- другие closeout-документы, если они явно указаны оттуда
+- any closeout documents explicitly referenced from those files
 
-Если у проекта есть обязательные closing actions, выполни их до финального ответа.
+If the project requires specific closing actions, complete them before the final response.
 
-### 2. Confirm stop point
+### 2. Confirm The Stop Point
 
-Убедись, что работа доведена до одной из корректных точек:
+Make sure the work is at one of these states:
 
-- задача завершена;
-- зафиксирован явный блокер;
-- подготовлен безопасный handoff для следующей сессии.
+- the requested task is complete;
+- there is a concrete blocker;
+- the next session has a clear handoff.
 
-Не закрывай сессию в подвешенном состоянии.
+Do not close while checks, edits, or needed background processes are still running.
 
-### 3. Verify real state
+### 3. Verify Real State
 
-Перед финальным сообщением проверь:
+Before the final response, inspect:
 
-- что именно изменено;
-- есть ли незакоммиченные правки;
-- есть ли запущенные, но не завершённые проверки;
-- есть ли созданные тобой временные файлы или артефакты.
+- what changed;
+- whether there are uncommitted changes;
+- whether checks are still running or failed;
+- whether temporary files or generated artifacts should be removed.
 
-Чужие изменения не трогай. Временные артефакты удаляй только если точно созданы этой сессией и это безопасно.
+Do not alter unrelated user changes. Remove temporary artifacts only when you created them in this session and cleanup is safe.
 
-Минимум:
+Minimum check:
 
 ```bash
 git status --short
 ```
 
-### 4. Update required docs
+### 4. Update Required Documentation
 
-Обнови только обязательную документацию:
+Update only documentation that is required by the project or directly useful for handoff, such as:
 
-- `agent_docs/development-history.md` — если сессия дала заметный результат;
-- `agent_docs/adr.md` — если принято устойчивое архитектурное решение;
-- `registry/` — если изменились skills, MCP, plugins, configs;
-- project docs/changelog/todo — только если этого требуют правила проекта или суть изменения.
+- project changelog or development history;
+- ADR or design notes when a durable decision was made;
+- source-of-truth config or inventory docs when the project explicitly uses them;
+- `todo.md` or equivalent when task state changed.
 
-Не превращай закрытие сессии в лишнюю бюрократию.
+Avoid adding process paperwork that the project does not ask for.
 
-### 5. Record ecosystem-impacting changes
+### 5. Record External Follow-up Only When Required
 
-Если во время сессии менялись:
+If local rules require a separate change log, tracker, issue, or release note, update it. If no such rule exists, skip this step.
 
-- skills;
-- MCP-серверы;
-- `AGENTS.md` или `CLAUDE.md`;
-- `agent_docs/`;
-- глобальные конфиги платформ,
+Do not write to external systems unless the user or project rules explicitly authorize it.
 
-запиши это в ecosystem inbox, если проект этого требует.
+### 6. Preserve Handoff Quality
 
-### 6. Preserve handoff quality
+The final response should make the session closable:
 
-В финале оставь только полезное:
+- what was done;
+- what changed;
+- what was verified;
+- what remains, if anything;
+- any blocker or follow-up.
 
-- что сделано;
-- что осталось;
-- что не удалось проверить;
-- где есть риск или follow-up.
+If nothing remains, say so directly.
 
-Если ничего не осталось, так и скажи.
+### 7. Commit Only When Appropriate
 
-### 7. Commit only when appropriate
+Do not commit automatically.
 
-Не коммить автоматически.
+Commit only when:
 
-Коммит делай только если:
+- the user explicitly requested it;
+- the project workflow requires it;
+- this session already includes a commit/PR workflow that expects the changes to be committed.
 
-- пользователь явно попросил;
-- workflow проекта прямо требует commit на closeout;
-- ты уже делал связанные изменения в этой сессии и project rules ожидают их фиксации.
+### 8. Close Cleanly
 
-### 8. Close cleanly
+Final answer shape:
 
-Финальный ответ должен позволять закрыть сессию без дополнительного расследования:
+- short summary;
+- important paths, PRs, or artifacts;
+- verification status;
+- unresolved risk or explicit "nothing left".
 
-- короткий итог;
-- важные пути/артефакты;
-- факт верификации или её отсутствие;
-- явное указание, можно ли закрывать сессию.
+## Default Checklist
 
-## Default closeout checklist
-
-Используй как короткий mental model:
-
-1. Проверить `AGENTS.md` и `CLAUDE.md`.
-2. Проверить `git status`.
-3. Обновить обязательные docs.
-4. Записать ecosystem change в inbox, если нужно.
-5. Упомянуть проверки, риски и follow-up.
-6. Закрыть сессию коротким handoff.
+1. Check `AGENTS.md` and `CLAUDE.md`.
+2. Check `git status`.
+3. Update required docs.
+4. Record required external follow-up only if project rules say so.
+5. Mention checks, risks, and follow-up.
+6. End with a concise handoff.
