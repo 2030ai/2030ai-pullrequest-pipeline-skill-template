@@ -34,7 +34,7 @@ If the user explicitly names reviewers in the current invocation, treat that as 
 - Pre-commit hook failures
 - Deploy или smoke check failure (после рапорта, не запускать revert автоматически)
 
-# PR Pipeline: self-check → PR → review mode → merge
+## PR Pipeline: self-check → PR → review mode → merge
 
 ## Invocation
 

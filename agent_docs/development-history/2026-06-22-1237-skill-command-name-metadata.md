@@ -7,6 +7,7 @@
 - Skills `/pullrequest` и `/endsession` приведены к единой metadata-схеме.
 - Первый H1 в каждом `SKILL.md` приведён к `# /command`.
 - Добавлены `agents/openai.yaml` с `display_name: "/command"`.
+- В `/pullrequest` прежний заголовок pipeline понижен до H2, чтобы сохранялся один H1 и проходил markdownlint.
 
 ## Зачем
 
