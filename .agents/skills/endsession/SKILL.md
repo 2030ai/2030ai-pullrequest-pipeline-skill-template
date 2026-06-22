@@ -1,9 +1,9 @@
 ---
 name: endsession
-description: "Close a coding session cleanly: verify the task reached a safe stopping point, inspect real repo state, update required project documentation, preserve handoff context, and report remaining risks. Use when the user asks to finish, wrap up, close the session, end the day, or follow project closeout rules."
+description: "/endsession — Close a coding session cleanly: verify the task reached a safe stopping point, inspect real repo state, update required project documentation, preserve handoff context, and report remaining risks. Use when the user asks to finish, wrap up, close the session, end the day, or follow project closeout rules."
 ---
 
-# Endsession
+# /endsession
 
 Close the session without leaving avoidable ambiguity or unfinished agent work.
 
