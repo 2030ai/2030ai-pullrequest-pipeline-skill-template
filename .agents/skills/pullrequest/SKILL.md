@@ -1,9 +1,9 @@
 ---
 name: pullrequest
-description: Use when creating PRs with configurable automated review modes - medium/default uses Codex + Copilot + Cursor Bugbot + Claude Code Review, max adds a user-run Claude Code ultrareview handoff; self-validates work, creates branch, opens PR, triggers reviews, validates and fixes comments iteratively
+description: "/pullrequest — Use when creating PRs with configurable automated review modes - medium/default uses Codex + Copilot + Cursor Bugbot + Claude Code Review, max adds a user-run Claude Code ultrareview handoff; self-validates work, creates branch, opens PR, triggers reviews, validates and fixes comments iteratively"
 ---
 
-## Reviewer configuration
+# /pullrequest
 
 Before triggering reviewers, read `reviewers.yaml` from this skill directory. It is the source of truth for review-mode membership.
 
@@ -34,7 +34,7 @@ If the user explicitly names reviewers in the current invocation, treat that as 
 - Pre-commit hook failures
 - Deploy или smoke check failure (после рапорта, не запускать revert автоматически)
 
-# PR Pipeline: self-check → PR → review mode → merge
+## PR Pipeline: self-check → PR → review mode → merge
 
 ## Invocation
 

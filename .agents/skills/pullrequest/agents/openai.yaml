@@ -1,0 +1,9 @@
+name: pullrequest
+display_name: "/pullrequest"
+description: "/pullrequest — Use when creating PRs with configurable automated review modes - medium/default uses Codex + Copilot + Cursor Bugbot + Claude Code Review, max adds a user-run Claude Code ultrareview handoff; self-validates work, creates branch, opens PR, triggers reviews, validates and fixes comments iteratively"
+short_description: "Use when creating PRs with configurable automated review modes - medium/default uses Codex + Copilot + Cursor Bugbot + Claude Code Review, max adds a user-run C"
+default_prompt: "Use /pullrequest for this workflow."
+interface:
+  display_name: "/pullrequest"
+  short_description: "Local project skill /pullrequest"
+  default_prompt: "Use $pullrequest for this local project workflow."

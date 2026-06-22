@@ -1,0 +1,9 @@
+name: endsession
+display_name: "/endsession"
+description: "/endsession — Close a coding session cleanly: verify the task reached a safe stopping point, inspect real repo state, update required project documentation, preserve handoff context, and report remaining risks. Use when the user asks to finish, wrap up, close the session, end the day, or follow project closeout rules."
+short_description: "Close a coding session cleanly: verify the task reached a safe stopping point, inspect real repo state, update required project documentation, preserve handoff"
+default_prompt: "Use /endsession for this workflow."
+interface:
+  display_name: "/endsession"
+  short_description: "Local project skill /endsession"
+  default_prompt: "Use $endsession for this local project workflow."
