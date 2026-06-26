@@ -29,4 +29,5 @@
 
 ## Инициализация
 
-- `agent_docs/setup-checklist.md` — чек-лист для нового проекта (удаляется после прохождения).
+- Пользовательская установка template описана в `README.md`, раздел `Install`.
+- В этом репозитории нет одноразового `agent_docs/setup-checklist.md`; если такой файл появляется в downstream-проекте, он относится к downstream bootstrap flow, а не к этому public skill template.

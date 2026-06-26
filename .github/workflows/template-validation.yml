@@ -1,0 +1,33 @@
+name: template validation
+
+on:
+  pull_request:
+    paths:
+      - '.agents/**'
+      - '.claude/**'
+      - '.codex/**'
+      - '.cursor/**'
+      - '.github/workflows/template-validation.yml'
+      - 'README.md'
+      - 'scripts/check-template.sh'
+  push:
+    branches: [main]
+    paths:
+      - '.agents/**'
+      - '.claude/**'
+      - '.codex/**'
+      - '.cursor/**'
+      - '.github/workflows/template-validation.yml'
+      - 'README.md'
+      - 'scripts/check-template.sh'
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check template structure
+        run: bash scripts/check-template.sh
